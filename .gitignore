@@ -8,3 +8,13 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Auto-generated runtime data (machine-local)
+Data/encryption.key
+Data/rag.db
+Data/hf_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
