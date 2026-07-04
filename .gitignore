@@ -13,6 +13,7 @@ wheels/
 Data/encryption.key
 Data/rag.db
 Data/hf_cache/
+Data/vector_store/
 
 # IDE
 .vscode/

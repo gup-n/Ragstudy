@@ -5,7 +5,9 @@ from pathlib import Path
 
 # langchain-community 正在逐步迁移到独立包，但目前仍是这些 Loader 的主要来源
 with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", message=".*langchain-community.*is being sunset.*")
+    warnings.filterwarnings(
+        "ignore", message=".*langchain-community.*is being sunset.*"
+    )
     from langchain_community.document_loaders import (
         Docx2txtLoader,
         TextLoader,
@@ -23,6 +25,7 @@ class SimpleMarkdownLoader(TextLoader):
     """
 
     pass
+
 
 # 文档存储目录，默认项目根目录下的 Data/Docs/ 文件夹
 DOCUMENT_DIR = Path(__file__).resolve().parent.parent / "Data/Docs"
