@@ -38,7 +38,7 @@ import sys
 from data_loader import load_documents
 from data_splitter import split_documents
 from embedding import get_embedding, init_db
-from vector_store import add_to_store, search, count_documents
+from vector_store import add_to_store, search, count_documents, force_reindex, get_file_list
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,6 +90,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-embed",
         action="store_true",
         help="跳过 Embedding 步骤（仅执行加载+切割）",
+    )
+    general.add_argument(
+        "--reindex",
+        action="store_true",
+        help="强制全量重建（--store 模式下，清空后重新入库所有文档）",
     )
 
     return parser.parse_args()
@@ -193,15 +198,29 @@ def cmd_store(args: argparse.Namespace) -> None:
 
     # --- Step 4: 入库 ---
     logger.info("")
-    logger.info("▶ Step 4/4: 存入 ChromaDB")
-    try:
-        n = add_to_store(chunks, emb)
-        total = count_documents(emb)
-        logger.info("   ✔ 本次入库: %d 个 Chunks", n)
-        logger.info("   ✔ 向量库总计: %d 个 Chunks", total)
-    except Exception as e:
-        logger.error("✘ 入库失败: %s", e)
-        sys.exit(1)
+    if args.reindex:
+        logger.info("▶ Step 4/4: 全量重建索引（--reindex）")
+        try:
+            n = force_reindex(chunks, emb)
+            total = count_documents(emb)
+            logger.info("   ✔ 全量重建完成: %d 个 Chunks", n)
+            logger.info("   ✔ 向量库总计: %d 个 Chunks", total)
+        except Exception as e:
+            logger.error("✘ 重建失败: %s", e)
+            sys.exit(1)
+    else:
+        logger.info("▶ Step 4/4: 增量入库 ChromaDB")
+        file_count = len(get_file_list(emb))
+        logger.info("   向量库已有 %d 个文件", file_count)
+        try:
+            added, skipped = add_to_store(chunks, emb)
+            total = count_documents(emb)
+            logger.info("   ✔ 新增/更新: %d Chunks", added)
+            logger.info("   ✔ 跳过(未变): %d Chunks", skipped)
+            logger.info("   ✔ 向量库总计: %d 个 Chunks", total)
+        except Exception as e:
+            logger.error("✘ 入库失败: %s", e)
+            sys.exit(1)
 
     _print_summary(documents, chunks)
 
