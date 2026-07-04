@@ -8,6 +8,7 @@
 .
 ├── main.py                    # 入口：端到端管线（load → split → store → query）
 ├── query_demo.py              # 查询演示脚本（单次 / 交互模式）
+├── rag_service.py             # 服务层：CLI / Web API 复用的管线能力
 ├── pyproject.toml             # 项目元数据与依赖
 ├── README.md
 │
@@ -52,25 +53,12 @@
 uv sync
 
 # 0️⃣ 首次使用需先配置 Embedding Provider
-uv run python -c "
-from embedding import init_db, save_config
-from embedding.schema import EmbeddingConfigCreate
-
-init_db()
-cfg = EmbeddingConfigCreate(
-    provider='openai-compatible',
-    model='text-embedding-3-small',
-    base_url='https://api.openai.com/v1',
-    api_key='sk-...',
-)
-save_config(cfg)
-print('✅ 配置已保存')
-"
+uv run python config_demo.py
 
 # 1️⃣ 入库文档（增量模式：新增/变更的文件自动处理，未变的跳过）
 uv run python main.py --store
 
-# 2️⃣ 查询演示
+# 2️⃣ 查询演示（会展示相关性分数）
 uv run python query_demo.py "RAG 的工作原理"
 ```
 
@@ -80,7 +68,7 @@ uv run python query_demo.py "RAG 的工作原理"
 原始文档 (PDF / TXT / MD / DOCX)
     │
     ▼ data_loader.loader
-List[Document]         ← page_content + metadata(source, filename)
+List[Document]         ← page_content + metadata(source, source_id, relative_path)
     │
     ▼ data_splitter.splitter
 List[Document]         ← chunk_size=800, overlap=150
@@ -95,10 +83,10 @@ List[Document]         ← chunk_size=800, overlap=150
 | ------ | -------- | ---------------- | ------------------------ |
 | 纯文本 | `.txt`   | 内置 `open()`    | 需 UTF-8 编码            |
 | Markdown | `.md`   | 轻量读取         | 以纯文本读取，无额外依赖 |
-| PDF    | `.pdf`   | `pypdf`          | 仅限文本型 PDF           |
-| Word   | `.docx`  | `python-docx`    | 支持 .docx 格式          |
+| PDF    | `.pdf`   | `pypdf`          | 轻量读取文本型 PDF       |
+| Word   | `.docx`  | `python-docx`    | 读取段落和表格文本       |
 
-不支持的扩展名会被自动跳过并记录。
+默认递归扫描 `Data/docs/`，不支持的扩展名会被自动跳过并记录。每个文档都会写入稳定的 `source_id`（相对路径），用于增量入库、删除和引用溯源。
 
 ## 文本切割
 
@@ -164,18 +152,22 @@ print('配置已保存')
 # 增量入库（默认）：对比文件指纹，新增/变更的入库，未变的跳过
 uv run python main.py --store
 
+# 增量入库，并清理本次扫描目录中已经删除的旧文件向量
+uv run python main.py --store --prune-deleted
+
 # 全量重建：清空后重新入库所有文档
 uv run python main.py --store --reindex
 ```
 
 **增量入库策略：**
-- 入库时在 metadata 中记录 `file_mtime` + `file_size`
+- 入库时在 metadata 中记录 `source_id`、`file_mtime`、`file_size`、`content_hash`
 - 下次入库前对比：
   | 情况 | 处理方式 |
   |------|----------|
   | 新文件 | 直接入库 |
-  | 文件已变更（mtime/size 不同） | 先删旧向量 → 重新入库 |
+  | 文件已变更（内容哈希或 mtime/size 不同） | 先删旧向量 → 重新入库 |
   | 文件未变更 | 跳过 |
+  | 文件已删除（使用 `--prune-deleted`） | 删除旧向量 |
 - 因此重复运行 `--store` 不会产生重复数据
 
 ### 查询演示（无需 LLM）
@@ -189,9 +181,12 @@ uv run python query_demo.py
 
 # 指定返回数量
 uv run python query_demo.py "向量化" --top-k 10
+
+# 设置最低相关性分数
+uv run python query_demo.py "向量化" --score-threshold 0.3
 ```
 
-查询结果展示：文件来源、匹配内容片段，不调用 LLM，用于验证检索效果。
+查询结果展示：相关性分数、文件来源、匹配内容片段，不调用 LLM，用于验证检索效果。
 
 ## 操作模式一览
 
@@ -199,8 +194,10 @@ uv run python query_demo.py "向量化" --top-k 10
 |------|------|
 | `uv run python main.py` | 管线：加载 → 切割 → 验证 Embedding |
 | `uv run python main.py --store` | 入库：加载 → 切割 → Embedding → ChromaDB（增量） |
+| `uv run python main.py --store --prune-deleted` | 增量入库并清理已删除源文件 |
 | `uv run python main.py --store --reindex` | 全量重建入库 |
 | `uv run python main.py --query "..."` | 检索：从 ChromaDB 搜索并展示结果 |
+| `uv run python main.py --query "..." --score-threshold 0.3` | 带相关性阈值检索 |
 | `uv run python main.py --skip-embed` | 仅加载 + 切割，跳过 Embedding |
 | `uv run python query_demo.py` | 交互式查询演示 |
 | `uv run python query_demo.py "..."` | 单次查询演示 |

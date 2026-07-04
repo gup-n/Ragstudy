@@ -41,7 +41,31 @@ def get_loader_for_file(file_path: str) -> Optional[BaseLoader]:
     return loader_cls(file_path, **kwargs)
 
 
-def load_documents(directory: Optional[str] = None) -> List[Document]:
+def _iter_files(dir_path: Path, recursive: bool) -> list[Path]:
+    """按配置扫描目录中的文件。"""
+    iterator = dir_path.rglob("*") if recursive else dir_path.iterdir()
+    return sorted(path for path in iterator if path.is_file())
+
+
+def _build_source_metadata(file_path: Path, doc_root: Path) -> dict[str, str]:
+    """生成供入库和检索复用的稳定文件 metadata。"""
+    relative_path = file_path.relative_to(doc_root).as_posix()
+    return {
+        "source": str(file_path),
+        "doc_root": str(doc_root),
+        "relative_path": relative_path,
+        # source_id 是向量库的文件级身份，使用相对路径可避免同名文件冲突。
+        "source_id": relative_path,
+        "filename": file_path.name,
+        "file_ext": file_path.suffix.lower(),
+    }
+
+
+def load_documents(
+    directory: Optional[str] = None,
+    *,
+    recursive: bool = True,
+) -> List[Document]:
     """扫描目录下所有支持格式的文档，返回 Document 列表。
 
     处理流程：
@@ -55,10 +79,12 @@ def load_documents(directory: Optional[str] = None) -> List[Document]:
         FileNotFoundError: 目录不存在
         ValueError: 没有成功加载任何文档
     """
-    dir_path = Path(directory or DOCUMENT_DIR)
+    dir_path = Path(directory or DOCUMENT_DIR).expanduser().resolve()
 
     if not dir_path.exists():
         raise FileNotFoundError(f"文档目录不存在: {dir_path}")
+    if not dir_path.is_dir():
+        raise ValueError(f"文档路径不是目录: {dir_path}")
 
     # 所有文档
     all_documents: List[Document] = []
@@ -66,28 +92,26 @@ def load_documents(directory: Optional[str] = None) -> List[Document]:
     loaded_files: List[tuple[str, int]] = []
     # 跳过的文档
     skipped_files: List[str] = []
-    # 递归时修改:for file_path in sorted(dir_path.rglob("*")):
-    for file_path in sorted(dir_path.iterdir()):
-        if file_path.is_dir():
-            continue
+    for file_path in _iter_files(dir_path, recursive=recursive):
         try:
             loader = get_loader_for_file(str(file_path))
             if loader is None:
-                skipped_files.append(file_path.name)
+                skipped_files.append(file_path.relative_to(dir_path).as_posix())
                 continue
 
             docs = loader.load()
+            source_metadata = _build_source_metadata(file_path, dir_path)
             for doc in docs:
-                doc.metadata.setdefault("source", str(file_path))
-                doc.metadata["filename"] = file_path.name
+                doc.metadata.update(source_metadata)
 
             all_documents.extend(docs)
             char_count = sum(len(d.page_content) for d in docs)
-            loaded_files.append((file_path.name, char_count))
+            loaded_files.append((source_metadata["relative_path"], char_count))
 
         except Exception as e:
-            logger.warning("文件加载失败: %s - %s", file_path.name, e)
-            skipped_files.append(file_path.name)
+            relative_name = file_path.relative_to(dir_path).as_posix()
+            logger.warning("文件加载失败: %s - %s", relative_name, e)
+            skipped_files.append(relative_name)
 
     # 输出摘要
     _print_summary(dir_path, loaded_files, skipped_files, all_documents)

@@ -62,7 +62,8 @@ def download_huggingface_model(
 
     except ImportError as e:
         raise ModelDownloadError(
-            "huggingface_hub is not installed. Please install it via 'pip install huggingface-hub'."
+            "huggingface_hub is not installed. "
+            "Please install it via 'pip install huggingface-hub'."
         ) from e
     except Exception as e:
         raise ModelDownloadError(f"Failed to download model {model_name}: {e}") from e

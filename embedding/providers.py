@@ -7,6 +7,7 @@ Factory / Manager / GUI 均无需修改。
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from langchain_core.embeddings import Embeddings
@@ -79,7 +80,9 @@ def _create_openai_compatible(config: EmbeddingConfig) -> Embeddings:
 # 键：Provider 名称（小写）
 # 值：工厂函数 (EmbeddingConfig) -> Embeddings
 
-PROVIDERS: dict[str, callable] = {
+ProviderFactory = Callable[[EmbeddingConfig], Embeddings]
+
+PROVIDERS: dict[str, ProviderFactory] = {
     "huggingface": _create_huggingface,
     "ollama": _create_ollama,
     "openai-compatible": _create_openai_compatible,

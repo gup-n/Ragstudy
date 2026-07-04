@@ -6,10 +6,12 @@
     add_to_store(chunks, embedding)      增量入库（跳过未变、替换已变）
     force_reindex(chunks, embedding)     强制全量重建
     search(query, embedding, k=5)        语义检索
+    search_with_scores(...)              语义检索并返回相关性分数
     get_retriever(embedding, k=5)        获取 Retriever
     count_documents(embedding)           查询文档总数
     get_file_list(embedding)             查询已入库的文件列表
     get_stored_file_index(embedding)     查询文件指纹索引
+    delete_by_source_ids(embedding, [])  按 source_id 删除向量
     delete_by_filenames(embedding, [])   按文件名删除向量
     delete_all(embedding)                清空向量库
 """
@@ -19,11 +21,13 @@ from vector_store.store import (
     count_documents,
     delete_all,
     delete_by_filenames,
+    delete_by_source_ids,
     force_reindex,
     get_file_list,
     get_retriever,
     get_stored_file_index,
     search,
+    search_with_scores,
 )
 
 __all__ = [
@@ -35,5 +39,7 @@ __all__ = [
     "get_file_list",
     "get_stored_file_index",
     "delete_by_filenames",
+    "delete_by_source_ids",
     "delete_all",
+    "search_with_scores",
 ]

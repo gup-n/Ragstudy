@@ -35,10 +35,14 @@ import argparse
 import logging
 import sys
 
-from data_loader import load_documents
-from data_splitter import split_documents
-from embedding import get_embedding, init_db
-from vector_store import add_to_store, search, count_documents, force_reindex, get_file_list
+from rag_service import (
+    ConfigurationError,
+    get_embeddings_or_raise,
+    index_documents,
+    load_and_split,
+    retrieve,
+    validate_embedding,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +57,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     # 操作模式
-    mode = parser.add_argument_group("操作模式（三选一，默认仅执行加载+切割+验证）")
+    mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--store",
         action="store_true",
@@ -87,6 +91,25 @@ def parse_args() -> argparse.Namespace:
         help="检索返回的最相似文档数量（默认 5）",
     )
     general.add_argument(
+        "--score-threshold",
+        type=float,
+        default=None,
+        help="最低相关性分数阈值（0-1，默认不限制）",
+    )
+    general.add_argument(
+        "--recursive",
+        dest="recursive",
+        action="store_true",
+        default=True,
+        help="递归扫描文档目录（默认开启）",
+    )
+    general.add_argument(
+        "--no-recursive",
+        dest="recursive",
+        action="store_false",
+        help="仅扫描文档目录第一层",
+    )
+    general.add_argument(
         "--skip-embed",
         action="store_true",
         help="跳过 Embedding 步骤（仅执行加载+切割）",
@@ -96,29 +119,39 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="强制全量重建（--store 模式下，清空后重新入库所有文档）",
     )
+    general.add_argument(
+        "--prune-deleted",
+        action="store_true",
+        help="增量入库时清理本次扫描目录中已删除文件的旧向量",
+    )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.top_k <= 0:
+        parser.error("--top-k 必须大于 0")
+    if args.score_threshold is not None and not 0 <= args.score_threshold <= 1:
+        parser.error("--score-threshold 必须在 0 到 1 之间")
+    if args.prune_deleted and not args.store:
+        parser.error("--prune-deleted 只能与 --store 一起使用")
+    return args
 
 
-def _get_embeddings() -> any:
+def _print_embedding_config_help() -> None:
+    logger.error("")
+    logger.error("✘ 未配置 Embedding Provider。")
+    logger.error("   请先通过以下方式配置：")
+    logger.error("")
+    logger.error("   uv run python config_demo.py")
+    logger.error("")
+    logger.error("   或使用 README 中的 save_config 示例。")
+
+
+def _get_embeddings() -> object:
     """初始化数据库并获取 Embedding 模型。"""
-    init_db()
-    emb = get_embedding()
-    if emb is None:
-        logger.error("")
-        logger.error("✘ 未配置 Embedding Provider。")
-        logger.error("   请先通过以下方式配置：")
-        logger.error("")
-        logger.error("   uv run python -c \"\"\"")
-        logger.error("   from embedding import init_db, save_config")
-        logger.error("   from embedding.schema import EmbeddingConfigCreate")
-        logger.error("")
-        logger.error("   init_db()")
-        logger.error("   cfg = EmbeddingConfigCreate(provider='openai-compatible', ...)")
-        logger.error("   save_config(cfg)")
-        logger.error("   \"\"\"")
+    try:
+        return get_embeddings_or_raise()
+    except ConfigurationError:
+        _print_embedding_config_help()
         sys.exit(1)
-    return emb
 
 
 def cmd_pipeline(args: argparse.Namespace) -> None:
@@ -129,41 +162,38 @@ def cmd_pipeline(args: argparse.Namespace) -> None:
 
     # --- Step 1: 加载 ---
     logger.info("")
-    logger.info("▶ Step 1/3: 加载文档")
+    logger.info("▶ Step 1/2: 加载并切割文档")
     try:
-        documents = load_documents(args.dir)
+        pipeline = load_and_split(
+            args.dir,
+            splitter=args.splitter,
+            recursive=args.recursive,
+        )
     except (FileNotFoundError, ValueError) as e:
-        logger.error("✘ 加载失败: %s", e)
-        sys.exit(1)
-
-    # --- Step 2: 切割 ---
-    logger.info("")
-    logger.info("▶ Step 2/3: 切割文本")
-    try:
-        chunks = split_documents(documents, args.splitter)
-    except ValueError as e:
-        logger.error("✘ 切割失败: %s", e)
+        logger.error("✘ 管线失败: %s", e)
         sys.exit(1)
 
     # --- Step 3: 可选验证 Embedding ---
     if args.skip_embed:
         logger.info("")
-        logger.info("⏭ Step 3/3: 已跳过（--skip-embed）")
+        logger.info("⏭ Step 2/2: 已跳过 Embedding 验证（--skip-embed）")
     else:
         logger.info("")
-        logger.info("▶ Step 3/3: 验证 Embedding 模型")
+        logger.info("▶ Step 2/2: 验证 Embedding 模型")
         emb = _get_embeddings()
-        sample_texts = [c.page_content[:200] for c in chunks[:3]]
         logger.info("   Embedding 模型就绪：%s", emb.__class__.__name__)
         try:
-            vectors = emb.embed_documents(sample_texts)
-            logger.info("   验证：前 %d 个 Chunks 嵌入成功", len(vectors))
-            for i, vec in enumerate(vectors):
-                logger.info("     chunk[%d] → 向量维度: %d", i, len(vec))
+            validation = validate_embedding(pipeline.chunks, emb)
+            logger.info(
+                "   验证：前 %d 个 Chunks 嵌入成功",
+                len(validation.vector_dimensions),
+            )
+            for i, dimension in enumerate(validation.vector_dimensions):
+                logger.info("     chunk[%d] → 向量维度: %d", i, dimension)
         except Exception as e:
             logger.error("   嵌入验证失败: %s", e)
 
-    _print_summary(documents, chunks)
+    _print_summary(pipeline.documents, pipeline.chunks)
 
 
 def cmd_store(args: argparse.Namespace) -> None:
@@ -172,57 +202,32 @@ def cmd_store(args: argparse.Namespace) -> None:
     print("  RAG 文档入库")
     print("=" * 55)
 
-    # --- Step 1: 加载 ---
     logger.info("")
-    logger.info("▶ Step 1/4: 加载文档")
+    logger.info("▶ 执行入库管线")
     try:
-        documents = load_documents(args.dir)
-    except (FileNotFoundError, ValueError) as e:
-        logger.error("✘ 加载失败: %s", e)
-        sys.exit(1)
-
-    # --- Step 2: 切割 ---
-    logger.info("")
-    logger.info("▶ Step 2/4: 切割文本")
-    try:
-        chunks = split_documents(documents, args.splitter)
-    except ValueError as e:
-        logger.error("✘ 切割失败: %s", e)
-        sys.exit(1)
-
-    # --- Step 3: Embedding 模型 ---
-    logger.info("")
-    logger.info("▶ Step 3/4: 初始化 Embedding 模型")
-    emb = _get_embeddings()
-    logger.info("   ✔ %s 就绪", emb.__class__.__name__)
-
-    # --- Step 4: 入库 ---
-    logger.info("")
-    if args.reindex:
-        logger.info("▶ Step 4/4: 全量重建索引（--reindex）")
-        try:
-            n = force_reindex(chunks, emb)
-            total = count_documents(emb)
-            logger.info("   ✔ 全量重建完成: %d 个 Chunks", n)
-            logger.info("   ✔ 向量库总计: %d 个 Chunks", total)
-        except Exception as e:
-            logger.error("✘ 重建失败: %s", e)
-            sys.exit(1)
-    else:
-        logger.info("▶ Step 4/4: 增量入库 ChromaDB")
-        file_count = len(get_file_list(emb))
-        logger.info("   向量库已有 %d 个文件", file_count)
-        try:
-            added, skipped = add_to_store(chunks, emb)
-            total = count_documents(emb)
-            logger.info("   ✔ 新增/更新: %d Chunks", added)
-            logger.info("   ✔ 跳过(未变): %d Chunks", skipped)
-            logger.info("   ✔ 向量库总计: %d 个 Chunks", total)
-        except Exception as e:
+        result = index_documents(
+            args.dir,
+            splitter=args.splitter,
+            recursive=args.recursive,
+            reindex=args.reindex,
+            prune_deleted=args.prune_deleted,
+        )
+    except (FileNotFoundError, ValueError, ConfigurationError) as e:
+        if isinstance(e, ConfigurationError):
+            _print_embedding_config_help()
+        else:
             logger.error("✘ 入库失败: %s", e)
-            sys.exit(1)
+        sys.exit(1)
+    except Exception as e:
+        logger.error("✘ 入库失败: %s", e)
+        sys.exit(1)
 
-    _print_summary(documents, chunks)
+    logger.info("")
+    logger.info("   ✔ 新增/更新: %d Chunks", result.added)
+    logger.info("   ✔ 跳过(未变): %d Chunks", result.skipped)
+    logger.info("   ✔ 向量库文件数: %d", result.file_count)
+    logger.info("   ✔ 向量库总计: %d 个 Chunks", result.total_chunks)
+    _print_summary(result.documents, result.chunks)
 
 
 def cmd_query(args: argparse.Namespace) -> None:
@@ -234,36 +239,43 @@ def cmd_query(args: argparse.Namespace) -> None:
     logger.info("")
     logger.info("查询: %s", args.query)
 
-    # --- Embedding 模型 ---
     logger.info("")
-    logger.info("▶ Step 1/2: 初始化 Embedding 模型")
-    emb = _get_embeddings()
-
-    # --- 检索 ---
-    logger.info("")
-    logger.info("▶ Step 2/2: ChromaDB 检索 (top-%d)", args.top_k)
+    logger.info("▶ ChromaDB 检索 (top-%d)", args.top_k)
     try:
-        results = search(args.query, emb, k=args.top_k)
+        retrieval = retrieve(
+            args.query,
+            top_k=args.top_k,
+            score_threshold=args.score_threshold,
+            include_scores=True,
+        )
+    except ConfigurationError:
+        _print_embedding_config_help()
+        sys.exit(1)
     except Exception as e:
         logger.error("✘ 检索失败: %s", e)
         sys.exit(1)
 
-    if not results:
+    if retrieval.stats.total_chunks == 0:
+        logger.info("   ❌ 向量库为空")
+        logger.info("   请先运行 uv run python main.py --store 入库文档")
+        return
+
+    if not retrieval.results:
         logger.info("   ❌ 未找到相关结果（向量库可能为空）")
         logger.info("   请先运行 uv run python main.py --store 入库文档")
         return
 
     logger.info("")
     logger.info("─" * 55)
-    logger.info("检索结果（共 %d 条）:", len(results))
+    logger.info("检索结果（共 %d 条）:", len(retrieval.results))
     logger.info("─" * 55)
 
-    for i, doc in enumerate(results, 1):
+    for i, (doc, score) in enumerate(retrieval.scored_results, 1):
         source = doc.metadata.get("source", "未知来源")
         filename = doc.metadata.get("filename", "未知文件")
         content = doc.page_content[:300].replace("\n", " ")
         logger.info("")
-        logger.info("  [%d] ─ %s", i, filename)
+        logger.info("  [%d] ─ %s (score: %.4f)", i, filename, score)
         logger.info("      来源: %s", source)
         logger.info("      内容: %s...", content)
 

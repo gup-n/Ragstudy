@@ -13,8 +13,12 @@ import argparse
 import logging
 import sys
 
-from embedding import get_embedding, init_db
-from vector_store import get_file_list, search, count_documents
+from rag_service import (
+    ConfigurationError,
+    get_embeddings_or_raise,
+    get_vector_store_stats,
+    retrieve,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,33 +50,33 @@ def print_result(index: int, doc, score: float | None = None) -> None:
     print()
 
 
-def demo(query: str, top_k: int = 5) -> None:
+def _print_config_error() -> None:
+    print()
+    print("✘ 错误：未配置 Embedding Provider。请先运行：")
+    print()
+    print("   uv run python config_demo.py")
+    print()
+
+
+def demo(query: str, top_k: int = 5, score_threshold: float | None = None) -> None:
     """执行一次检索并展示结果。"""
     print_banner()
 
     # Step 1: Embedding 模型
     print("▶ Step 1/3: 初始化 Embedding 模型...")
-    init_db()
-    emb = get_embedding()
-    if emb is None:
-        print()
-        print("✘ 错误：未配置 Embedding Provider。请先运行：")
-        print()
-        print("   uv run python -c \"\"\"")
-        print("   from embedding import init_db, save_config")
-        print("   from embedding.schema import EmbeddingConfigCreate")
-        print("   init_db()")
-        print("   cfg = EmbeddingConfigCreate(provider='openai-compatible', ...)")
-        print("   save_config(cfg)")
-        print('   """')
+    try:
+        emb = get_embeddings_or_raise()
+    except ConfigurationError:
+        _print_config_error()
         sys.exit(1)
     print(f"   ✔ {emb.__class__.__name__} 就绪")
     print()
 
     # Step 2: 向量库状态
     print("▶ Step 2/3: 检查向量库状态...")
-    total = count_documents(emb)
-    files = get_file_list(emb)
+    stats = get_vector_store_stats(emb)
+    total = stats.total_chunks
+    files = stats.files
     print(f"   ✔ 向量库共 {total} 个 Chunks，来自 {len(files)} 个文件")
     if files:
         for f in files:
@@ -90,22 +94,27 @@ def demo(query: str, top_k: int = 5) -> None:
     print(f"▶ Step 3/3: 语义检索「{query}」(top-{top_k})...")
     print()
 
-    results = search(query, emb, k=top_k)
+    retrieval = retrieve(
+        query,
+        top_k=top_k,
+        score_threshold=score_threshold,
+        embedding=emb,
+    )
 
-    if not results:
+    if not retrieval.results:
         print("  ❌ 未找到相关结果")
         print()
         return
 
-    print(f"   ✔ 找到 {len(results)} 个相关片段")
+    print(f"   ✔ 找到 {len(retrieval.results)} 个相关片段")
     print()
     print("─" * 55)
     print("  检索结果")
     print("─" * 55)
     print()
 
-    for i, doc in enumerate(results, 1):
-        print_result(i, doc)
+    for i, (doc, score) in enumerate(retrieval.scored_results, 1):
+        print_result(i, doc, score)
 
     print("─" * 55)
     print("  提示：将检索结果与大语言模型结合，即可实现完整 RAG 问答。")
@@ -113,19 +122,20 @@ def demo(query: str, top_k: int = 5) -> None:
     print()
 
 
-def interactive_mode(top_k: int = 5) -> None:
+def interactive_mode(top_k: int = 5, score_threshold: float | None = None) -> None:
     """交互式检索：反复输入问题，Ctrl+C 退出。"""
     # 预先初始化
     print_banner()
     print("▶ 初始化 Embedding 模型和向量库...")
-    init_db()
-    emb = get_embedding()
-    if emb is None:
-        print("✘ 未配置 Embedding Provider")
+    try:
+        emb = get_embeddings_or_raise()
+        stats = get_vector_store_stats(emb)
+    except ConfigurationError:
+        _print_config_error()
         sys.exit(1)
 
-    total = count_documents(emb)
-    files = get_file_list(emb)
+    total = stats.total_chunks
+    files = stats.files
     print(f"   ✔ 向量库共 {total} 个 Chunks，来自 {len(files)} 个文件")
     if total == 0:
         print("⚠ 向量库为空！请先运行 uv run python main.py --store")
@@ -152,16 +162,21 @@ def interactive_mode(top_k: int = 5) -> None:
             break
 
         print()
-        results = search(query, emb, k=top_k)
+        retrieval = retrieve(
+            query,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            embedding=emb,
+        )
         print()
 
-        if not results:
+        if not retrieval.results:
             print("  ❌ 未找到相关结果")
             print()
             continue
 
-        for i, doc in enumerate(results, 1):
-            print_result(i, doc)
+        for i, (doc, score) in enumerate(retrieval.scored_results, 1):
+            print_result(i, doc, score)
 
         print("─" * 55)
         print()
@@ -184,12 +199,22 @@ def main() -> None:
         default=5,
         help="检索返回的最相似文档数量（默认 5）",
     )
+    parser.add_argument(
+        "--score-threshold",
+        type=float,
+        default=None,
+        help="最低相关性分数阈值（0-1，默认不限制）",
+    )
     args = parser.parse_args()
+    if args.top_k <= 0:
+        parser.error("--top-k 必须大于 0")
+    if args.score_threshold is not None and not 0 <= args.score_threshold <= 1:
+        parser.error("--score-threshold 必须在 0 到 1 之间")
 
     if args.query:
-        demo(args.query, top_k=args.top_k)
+        demo(args.query, top_k=args.top_k, score_threshold=args.score_threshold)
     else:
-        interactive_mode(top_k=args.top_k)
+        interactive_mode(top_k=args.top_k, score_threshold=args.score_threshold)
 
 
 if __name__ == "__main__":

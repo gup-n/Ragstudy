@@ -12,6 +12,7 @@
 
 import logging
 import sys
+from getpass import getpass
 
 from embedding import init_db, save_config, get_embedding
 from embedding.schema import EmbeddingConfigCreate
@@ -95,7 +96,7 @@ def collect_config(provider_id: str) -> EmbeddingConfigCreate:
 
     for field, label, default in info["fields"]:
         if field == "api_key":
-            val = input(f"  {label} (输入后不可见): ").strip()
+            val = getpass(f"  {label} (输入后不可见): ").strip()
             kwargs[field] = val if val else None
         else:
             kwargs[field] = input_value(label, default)

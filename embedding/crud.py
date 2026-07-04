@@ -10,6 +10,7 @@ API Key 在写入时自动加密，读取时自动解密。
 
 import json
 import logging
+from datetime import datetime, timezone
 from functools import lru_cache
 
 from cryptography.fernet import Fernet
@@ -129,17 +130,19 @@ def _apply_update_to_orm(
     update_data: EmbeddingConfigUpdate, orm_row: EmbeddingConfigModel
 ) -> None:
     """应用更新数据到 ORM 对象，仅更新非 None 字段。"""
-    if update_data.provider is not None:
+    fields_set = update_data.model_fields_set
+
+    if "provider" in fields_set and update_data.provider is not None:
         orm_row.provider = update_data.provider
-    if update_data.model is not None:
+    if "model" in fields_set and update_data.model is not None:
         orm_row.model = update_data.model
-    if update_data.base_url is not None:
+    if "base_url" in fields_set:
         orm_row.base_url = update_data.base_url
-    if update_data.api_key is not None:
+    if "api_key" in fields_set:
         orm_row.api_key = encrypt_api_key(update_data.api_key)
-    if update_data.enabled is not None:
+    if "enabled" in fields_set and update_data.enabled is not None:
         orm_row.enabled = update_data.enabled
-    if update_data.extra is not None:
+    if "extra" in fields_set:
         orm_row.extra = _dump_extra(update_data.extra)
 
 
@@ -202,7 +205,7 @@ def update_config(
         _disable_other_configs(session, exclude_id=config_id)
 
     # 所有修改完成后，显式更新时间戳
-    orm_row.updated_at = func.now()
+    orm_row.updated_at = datetime.now(timezone.utc)
     session.flush()
     return _orm_to_read(orm_row)
 
@@ -227,7 +230,7 @@ def set_enabled(session: Session, config_id: int, enabled: bool) -> EmbeddingCon
         _disable_other_configs(session, exclude_id=config_id)
 
     orm_row.enabled = enabled
-    orm_row.updated_at = func.now()
+    orm_row.updated_at = datetime.now(timezone.utc)
     session.flush()
     return _orm_to_read(orm_row)
 

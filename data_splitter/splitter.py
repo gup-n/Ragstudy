@@ -12,6 +12,7 @@ TextSplitter 类，新增切割策略只需维护映射表即可。
 """
 
 import logging
+from collections import defaultdict
 from typing import List
 
 from langchain_core.documents import Document
@@ -89,6 +90,7 @@ def split_documents(
     splitter = get_text_splitter(splitter_type)
 
     split_docs = splitter.split_documents(documents)
+    _annotate_chunks(split_docs)
 
     _print_summary(
         original_docs=documents,
@@ -97,6 +99,21 @@ def split_documents(
     )
 
     return split_docs
+
+
+def _annotate_chunks(split_docs: List[Document]) -> None:
+    """为每个 source_id 下的 Chunk 写入稳定序号和 chunk_id。"""
+    counters: dict[str, int] = defaultdict(int)
+    for doc in split_docs:
+        source_id = doc.metadata.get("source_id") or doc.metadata.get(
+            "filename",
+            "unknown",
+        )
+        chunk_index = counters[source_id]
+        counters[source_id] += 1
+
+        doc.metadata["chunk_index"] = chunk_index
+        doc.metadata["chunk_id"] = f"{source_id}::chunk-{chunk_index}"
 
 
 def _print_summary(

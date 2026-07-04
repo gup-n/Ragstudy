@@ -3,15 +3,17 @@
 import warnings
 from pathlib import Path
 
+from langchain_core.document_loaders import BaseLoader
+from langchain_core.documents import Document
+
 # langchain-community 正在逐步迁移到独立包，但目前仍是这些 Loader 的主要来源
 with warnings.catch_warnings():
     warnings.filterwarnings(
         "ignore", message=".*langchain-community.*is being sunset.*"
     )
     from langchain_community.document_loaders import (
-        Docx2txtLoader,
+        PyPDFLoader,
         TextLoader,
-        UnstructuredPDFLoader,
     )
 
 
@@ -27,8 +29,30 @@ class SimpleMarkdownLoader(TextLoader):
     pass
 
 
-# 文档存储目录，默认项目根目录下的 Data/Docs/ 文件夹
-DOCUMENT_DIR = Path(__file__).resolve().parent.parent / "Data/Docs"
+class SimpleDocxLoader(BaseLoader):
+    """轻量级 DOCX 加载器——使用项目已声明的 python-docx 依赖。"""
+
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+
+    def load(self) -> list[Document]:
+        from docx import Document as DocxDocument
+
+        docx = DocxDocument(self.file_path)
+        paragraphs = [p.text.strip() for p in docx.paragraphs if p.text.strip()]
+        tables = []
+        for table in docx.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if cells:
+                    tables.append(" | ".join(cells))
+
+        content = "\n".join(paragraphs + tables)
+        return [Document(page_content=content, metadata={"source": self.file_path})]
+
+
+# 文档存储目录，默认项目根目录下的 Data/docs/ 文件夹
+DOCUMENT_DIR = Path(__file__).resolve().parent.parent / "Data" / "docs"
 
 # ---------------------------------------------------------------------------
 # 文件格式 → 加载器 映射表
@@ -38,13 +62,12 @@ DOCUMENT_DIR = Path(__file__).resolve().parent.parent / "Data/Docs"
 LOADER_MAPPING = {
     ".txt": TextLoader,
     ".md": SimpleMarkdownLoader,
-    ".pdf": UnstructuredPDFLoader,
-    ".docx": Docx2txtLoader,
+    ".pdf": PyPDFLoader,
+    ".docx": SimpleDocxLoader,
 }
 
 # 每种加载器的额外参数（无参数则为空字典）
 LOADER_ARGS = {
     ".txt": {"encoding": "utf-8"},
     ".md": {"encoding": "utf-8"},
-    ".pdf": {"strategy": "auto"},
 }

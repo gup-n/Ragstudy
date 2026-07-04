@@ -1,15 +1,26 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
+
+
+ProviderName = Literal["huggingface", "ollama", "openai-compatible"]
 
 
 class EmbeddingConfigBase(BaseModel):
-    provider: str
+    provider: ProviderName
     model: str
     base_url: Optional[str] = None
     api_key: Optional[str] = None
-    extra: Optional[dict] = None
+    extra: Optional[dict[str, Any]] = None
+
+    @field_validator("model")
+    @classmethod
+    def clean_model(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("model 不能为空")
+        return stripped
 
 
 class EmbeddingConfigCreate(EmbeddingConfigBase):
@@ -25,12 +36,22 @@ class EmbeddingConfigCreate(EmbeddingConfigBase):
 
 
 class EmbeddingConfigUpdate(BaseModel):
-    provider: Optional[str] = None
+    provider: Optional[ProviderName] = None
     model: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     enabled: Optional[bool] = None
-    extra: Optional[dict] = None
+    extra: Optional[dict[str, Any]] = None
+
+    @field_validator("model")
+    @classmethod
+    def clean_model(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("model 不能为空")
+        return stripped
 
     @field_validator("api_key")
     @classmethod
@@ -57,8 +78,7 @@ class EmbeddingConfigRead(EmbeddingConfigBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EmbeddingError(Exception):

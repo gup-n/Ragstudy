@@ -22,9 +22,10 @@ def create_embeddings(config: EmbeddingConfig) -> Embeddings:
     Raises:
         ProviderNotFoundError: config.provider 未在 PROVIDERS 中注册。
     """
-    factory = PROVIDERS.get(config.provider)
+    provider = config.provider.lower()
+    factory = PROVIDERS.get(provider)
     if factory is None:
         raise ProviderNotFoundError(config.provider)
 
-    logger.info("Creating embeddings: provider=%s model=%s", config.provider, config.model)
+    logger.info("Creating embeddings: provider=%s model=%s", provider, config.model)
     return factory(config)
