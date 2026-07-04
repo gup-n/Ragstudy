@@ -18,10 +18,11 @@ class SimpleMarkdownLoader(TextLoader):
 
     UnstructuredMarkdownLoader 依赖太重（需要 spaCy 模型），
     对于大多数场景，直接以纯文本读取 Markdown 并标注格式即可。
+
+    编码由 LOADER_ARGS[".md"] 控制，默认 utf-8。
     """
 
-    def __init__(self, file_path: str, **kwargs):
-        super().__init__(file_path, encoding="utf-8", **kwargs)
+    pass
 
 # 文档存储目录，默认项目根目录下的 Data/Docs/ 文件夹
 DOCUMENT_DIR = Path(__file__).resolve().parent.parent / "Data/Docs"
@@ -40,5 +41,7 @@ LOADER_MAPPING = {
 
 # 每种加载器的额外参数（无参数则为空字典）
 LOADER_ARGS = {
+    ".txt": {"encoding": "utf-8"},
+    ".md": {"encoding": "utf-8"},
     ".pdf": {"strategy": "auto"},
 }
