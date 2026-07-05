@@ -20,6 +20,9 @@ dependencies = [
     "huggingface-hub>=0.23.0",
     "markdown>=3.10.2",
     "langchain-chroma>=0.2.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "streamlit>=1.37.0",
 ]
 
 [project.optional-dependencies]
@@ -37,3 +40,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.15.20",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

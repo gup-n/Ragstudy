@@ -72,6 +72,7 @@ def init_db() -> None:
     如果存在循环导入问题，可将 `from embedding.models import Base` 移入函数内部。
     """
     from embedding.models import Base
+    import llm.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     logger.info("Database initialized at %s", DATABASE_PATH)

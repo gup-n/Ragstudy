@@ -76,9 +76,10 @@ def load_and_split(
     *,
     splitter: str = "recursive",
     recursive: bool = True,
+    strict_load: bool = False,
 ) -> PipelineResult:
     """加载并切割文档。"""
-    documents = load_documents(directory, recursive=recursive)
+    documents = load_documents(directory, recursive=recursive, strict=strict_load)
     chunks = split_documents(documents, splitter)
     return PipelineResult(documents=documents, chunks=chunks)
 
@@ -112,7 +113,13 @@ def index_documents(
     prune_deleted: bool = False,
 ) -> IndexResult:
     """加载、切割并写入向量库。"""
-    pipeline = load_and_split(directory, splitter=splitter, recursive=recursive)
+    pipeline = load_and_split(
+        directory,
+        splitter=splitter,
+        recursive=recursive,
+        # 清理已删除文件依赖“本次扫描完整可信”。若存在解析失败，不能把缺失结果当作删除。
+        strict_load=prune_deleted,
+    )
     embedding = get_embeddings_or_raise()
 
     # 全量重建和增量入库共用同一套加载结果，保证 CLI 与未来 API 行为一致。

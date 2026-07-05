@@ -47,6 +47,45 @@
 - `emb`：复用的 Embedding 实例。
 - `retrieval`：服务层返回的检索结果对象。
 
+### `answer_demo.py`
+
+整体功能：完整 RAG 问答演示脚本，支持单次问题和交互式问答；流程为检索相关片段，再调用 Chat LLM 生成带引用的回答。
+
+主要方法：
+- `print_banner()`：打印问答演示标题。
+- `_print_embedding_config_error()`：展示 Embedding 缺失时的配置提示。
+- `_print_llm_config_error()`：展示 LLM 配置缺失或非法时的配置提示。
+- `_print_answer()`：格式化输出回答、引用来源和可选上下文。
+- `_prepare_runtime()`：初始化 Embedding、检查向量库并创建 Chat LLM。
+- `ask_once()`：执行单次问答。
+- `interactive_mode()`：循环读取问题并复用同一个 Embedding 和 LLM 实例。
+- `main()`：解析参数并选择单次或交互模式。
+
+关键变量：
+- `top_k`：检索片段数量。
+- `score_threshold`：最低相关性分数阈值。
+- `context_max_chars`：发送给 LLM 的上下文最大字符数。
+- `show_context`：是否输出实际拼接的上下文。
+- `embedding`、`llm`：问答过程中复用的模型实例。
+
+### `llm_config_demo.py`
+
+整体功能：交互式 Chat LLM Provider 配置向导，支持 API 模型和本地 Ollama 模型。
+
+主要方法：
+- `print_banner()`：打印 LLM 配置向导标题。
+- `choose_provider()`：让用户选择 OpenAI-Compatible 或 Ollama。
+- `input_value()`、`input_float()`：读取带默认值的字符串和数字配置项。
+- `collect_config()`：根据 Provider 收集参数并生成配置对象。
+- `verify_llm()`：验证是否能创建 Chat LLM 实例，不主动发送测试请求。
+- `main()`：执行初始化、选择、填写、保存和验证流程。
+
+关键变量：
+- `PROVIDER_INFO`：Provider 展示信息和字段定义。
+- `provider_id`：用户选择的 LLM Provider 标识。
+- `config`：待保存的 LLM 配置。
+- `temperature`、`timeout`：生成温度和 OpenAI-Compatible 请求超时。
+
 ### `config_demo.py`
 
 整体功能：交互式 Embedding Provider 配置向导。
@@ -79,7 +118,7 @@
 
 主要方法：
 - `get_embeddings_or_raise()`：初始化数据库并获取当前启用的 Embedding。
-- `load_and_split()`：加载文档并切割为 Chunks。
+- `load_and_split()`：加载文档并切割为 Chunks，可在需要时启用严格加载。
 - `validate_embedding()`：用少量 Chunk 验证 Embedding 可用性。
 - `index_documents()`：加载、切割并写入向量库。
 - `get_vector_store_stats()`：读取向量库文件数和 Chunk 数。
@@ -89,9 +128,84 @@
 - `directory`：文档目录。
 - `splitter`：切割策略。
 - `recursive`：是否递归扫描。
+- `strict_load`：是否在任意文件加载失败时中止管线。
 - `reindex`：是否全量重建。
 - `prune_deleted`：是否清理已删除源文件。
 - `include_scores`：是否返回相关性分数。
+
+### `rag_chain.py`
+
+整体功能：完整 RAG 问答链模块，负责获取 Chat LLM、拼接检索上下文、构造提示词并返回带来源引用的答案。LLM 配置本身由 `llm/` 模块管理。
+
+主要类型：
+- `SourceReference`：单个引用片段的来源信息。
+- `RagAnswer`：问答结果，包含答案、引用、上下文和检索结果。
+
+主要方法：
+- `create_chat_model()`：根据显式配置创建 Chat LLM，或读取当前启用的 LLM 配置。
+- `build_context()`：把带分数检索结果拼接为带编号上下文，并生成引用来源列表。
+- `build_messages()`：构造系统提示词和用户提示词。
+- `answer_question()`：执行检索、上下文拼接和 LLM 生成。
+
+关键变量：
+- `DEFAULT_CONTEXT_MAX_CHARS`：默认上下文最大字符数。
+- `sources`：随答案返回的引用片段列表。
+
+---
+
+## Web API 与页面
+
+### `api/app.py`
+
+整体功能：FastAPI 后端入口，暴露 RAG 管线状态、入库、检索和问答接口。
+
+主要方法：
+- `lifespan()`：应用启动时初始化数据库表。
+- `health()`：返回 API 健康状态。
+- `config_status()`：返回 Embedding 和 LLM 配置状态，不返回任何密钥。
+- `stats()`：返回向量库 Chunk 数和文件列表。
+- `index()`：触发文档入库，复用 `rag_service.index_documents()`。
+- `semantic_retrieve()`：执行语义检索，复用 `rag_service.retrieve()`。
+- `answer()`：执行 RAG 问答，复用 `rag_chain.answer_question()`。
+
+关键变量：
+- `app`：FastAPI 应用实例。
+- `request`：接口请求模型。
+- `result`：服务层或问答链返回结果。
+
+### `api/schemas.py`
+
+整体功能：定义 FastAPI 请求和响应模型。
+
+主要类型：
+- `HealthResponse`、`ConfigStatusResponse`、`VectorStatsResponse`：状态相关响应。
+- `IndexRequest`、`IndexResponse`：入库请求和响应。
+- `RetrievalRequest`、`RetrievalResponse`、`RetrievedChunk`：检索请求和响应。
+- `AnswerRequest`、`AnswerResponse`、`SourceReferenceResponse`：问答请求和响应。
+
+关键变量：
+- `query`：用户查询或问题。
+- `top_k`：检索片段数量。
+- `score_threshold`：相关性分数阈值。
+- `context_max_chars`：问答上下文最大字符数。
+
+### `web/streamlit_app.py`
+
+整体功能：Streamlit RAG 控制台，通过 HTTP 连接 FastAPI 后端。
+
+主要方法：
+- `_api_base_url()`：读取侧边栏 API 地址，默认 `http://127.0.0.1:8000`。
+- `_request_json()`：封装 JSON HTTP 请求和错误处理。
+- `render_status()`：渲染 API、配置和向量库状态。
+- `render_index()`：渲染文档入库表单。
+- `render_retrieve()`：渲染语义检索表单和结果。
+- `render_answer()`：渲染 RAG 问答表单、答案和引用来源。
+- `main()`：创建页面布局和 Tab。
+
+关键变量：
+- `base_url`：FastAPI 地址。
+- `payload`：发送给 API 的请求体。
+- `data`、`error`：API 返回数据和错误消息。
 
 ---
 
@@ -121,7 +235,7 @@
 - `get_loader_for_file()`：根据文件扩展名创建对应 Loader。
 - `_iter_files()`：根据递归配置枚举文件。
 - `_build_source_metadata()`：生成稳定文件 metadata。
-- `load_documents()`：加载目录中的所有支持文档。
+- `load_documents()`：加载目录中的所有支持文档，跳过空内容文档，可通过 `strict` 在加载失败时中止。
 - `_print_summary()`：输出加载摘要。
 
 关键变量：
@@ -130,6 +244,7 @@
 - `all_documents`：所有加载成功的 Document。
 - `loaded_files`：加载成功的文件统计。
 - `skipped_files`：跳过或加载失败的文件。
+- `failed_files`：加载失败的文件及错误信息，用于严格模式阻止后续危险操作。
 
 ### `data_loader/__init__.py`
 
@@ -337,6 +452,111 @@
 
 ---
 
+## LLM 模块
+
+### `llm/config.py`
+
+整体功能：集中维护 Chat LLM 默认参数。
+
+关键变量：
+- `OPENAI_COMPATIBLE_DEFAULT_BASE_URL`：OpenAI-compatible 默认 API 地址。
+- `OLLAMA_DEFAULT_BASE_URL`：Ollama 默认服务地址。
+- `DEFAULT_TEMPERATURE`：默认生成温度。
+- `DEFAULT_TIMEOUT`：默认请求超时。
+
+### `llm/schema.py`
+
+整体功能：定义 Chat LLM 配置的数据模型和异常类型。
+
+主要类型：
+- `ProviderName`：支持的 Provider 名称集合。
+- `LLMConfigBase`：配置基础字段。
+- `LLMConfigCreate`：新增配置模型。
+- `LLMConfigUpdate`：更新配置模型。
+- `LLMConfig`：运行时配置模型。
+- `LLMConfigRead`：数据库读取模型。
+- `LLMError` 及其子类：LLM 模块异常。
+
+关键变量：
+- `provider`：Provider 类型，当前支持 `openai-compatible` 和 `ollama`。
+- `model`：Chat 模型名称。
+- `base_url`：服务地址。
+- `api_key`：可选密钥。
+- `temperature`、`timeout`：生成温度和请求超时。
+- `extra`：Provider 特定附加参数。
+
+### `llm/models.py`
+
+整体功能：定义 LLM 配置的 SQLAlchemy ORM 模型。
+
+主要类型：
+- `LLMConfigModel`：LLM 配置表，复用 `embedding.models.Base`。
+
+关键变量：
+- `id`：主键。
+- `provider`、`model`、`base_url`、`api_key`：模型配置。
+- `temperature`、`timeout`：生成与请求参数。
+- `enabled`：是否启用。
+- `extra`：JSON 字符串形式的额外配置。
+- `ix_unique_llm_enabled_true`：保证最多一条启用的 LLM 配置。
+
+### `llm/crud.py`
+
+整体功能：提供 LLM 配置的增删改查，并复用 Embedding 的 Fernet 加密能力处理 API Key。
+
+主要方法：
+- `create_config()`、`update_config()`、`get_config()`、`list_configs()`：基础 CRUD。
+- `set_enabled()`、`has_enabled_config()`：启用配置管理。
+- `save_config()`、`get_enabled_config()`、`delete_config()`：自动管理 Session 的便捷函数。
+
+关键变量：
+- `LLMConfigModel`：数据库中的 LLM 配置记录。
+- `fields_set`：更新请求中实际传入的字段集合。
+
+### `llm/env.py`
+
+整体功能：在数据库没有启用 LLM 配置时，提供 `RAG_LLM_*` 环境变量兜底读取。
+
+主要方法：
+- `load_config_from_env()`：从 `.env` 或环境变量构造运行时 `LLMConfig`。
+
+关键变量：
+- `RAG_LLM_PROVIDER`、`RAG_LLM_MODEL`、`RAG_LLM_BASE_URL`、`RAG_LLM_API_KEY`：环境变量兜底配置。
+
+### `llm/providers.py`
+
+整体功能：维护 Chat LLM Provider 工厂函数注册表。
+
+主要方法：
+- `_create_openai_compatible()`：创建 OpenAI-compatible Chat 模型。
+- `_create_ollama()`：创建 Ollama Chat 模型。
+
+关键变量：
+- `PROVIDERS`：Provider 名称到工厂函数的映射。
+
+### `llm/factory.py`
+
+整体功能：根据运行时配置创建 Chat LLM 实例。
+
+主要方法：
+- `create_chat_model()`：查找 Provider 工厂并创建 Chat 模型。
+
+### `llm/manager.py`
+
+整体功能：LLM 模块对外统一入口。
+
+主要方法：
+- `get_chat_model()`：优先读取数据库中启用的 LLM 配置；没有时读取环境变量兜底。
+
+### `llm/__init__.py`
+
+整体功能：集中导出 LLM 模块公共 API。
+
+关键变量：
+- `__all__`：模块公开接口清单。
+
+---
+
 ## 向量库模块
 
 ### `vector_store/config.py`
@@ -447,6 +667,49 @@
 关键变量：
 - `config`：合法的 Embedding 配置对象。
 
+### `tests/test_rag_chain.py`
+
+整体功能：验证 RAG 问答链的纯逻辑，不调用真实 LLM 或外部网络。
+
+主要方法：
+- `test_build_context_adds_cited_source_metadata()`：验证上下文拼接和来源引用 metadata。
+- `test_build_context_respects_max_chars()`：验证上下文长度上限。
+- `test_build_messages_instructs_model_to_use_citations()`：验证提示词要求模型基于上下文并使用引用编号。
+- `test_response_to_text_handles_chat_message()`：验证 ChatMessage 响应转文本。
+
+关键变量：
+- `context`：发送给 LLM 的拼接上下文。
+- `sources`：上下文对应的来源引用列表。
+- `messages`：问答链构造的 Chat 消息。
+
+### `tests/test_llm_schema.py`
+
+整体功能：验证 LLM 配置模型和环境变量兜底解析，不调用真实 LLM 或外部网络。
+
+主要方法：
+- `test_llm_config_rejects_empty_model()`：空模型名应校验失败。
+- `test_llm_config_accepts_local_ollama_model()`：本地 Ollama 模型配置可创建。
+- `test_llm_config_strips_api_key()`：API Key 会清理前后空白。
+- `test_llm_env_fallback_requires_model()`：环境变量兜底必须提供模型名。
+- `test_llm_env_fallback_loads_openai_compatible()`：环境变量可构造 OpenAI-compatible 配置。
+
+关键变量：
+- `config`：合法的 LLM 配置对象。
+
+### `tests/test_api.py`
+
+整体功能：验证 FastAPI 接口契约，不调用真实 Embedding、真实 LLM 或外部网络。
+
+主要方法：
+- `test_health_endpoint()`：验证 `/health` 健康检查。
+- `test_config_status_handles_invalid_env_llm()`：验证非法环境变量不会让配置状态接口崩溃。
+- `test_retrieve_endpoint_returns_scored_chunks()`：验证 `/retrieve` 返回片段、分数和 metadata。
+- `test_answer_endpoint_returns_sources()`：验证 `/answer` 返回答案和引用来源。
+
+关键变量：
+- `client`：FastAPI TestClient。
+- `fake_retrieve`、`fake_answer_question`：替代真实服务调用的测试桩。
+
 ### `tests/manual_logic_check.py`
 
 整体功能：在没有 pytest 命令时执行轻量冒烟检查，覆盖核心纯逻辑。
@@ -456,6 +719,7 @@
 - `check_splitter()`：检查 Chunk 序号和 Chunk 身份。
 - `check_vector_metadata()`：检查向量 metadata 纯函数。
 - `check_embedding_schema()`：检查 Embedding 配置校验。
+- `check_llm_schema()`：检查 LLM 配置校验。
 - `main()`：依次执行所有检查。
 
 关键变量：

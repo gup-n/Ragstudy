@@ -65,6 +65,7 @@ def load_documents(
     directory: Optional[str] = None,
     *,
     recursive: bool = True,
+    strict: bool = False,
 ) -> List[Document]:
     """扫描目录下所有支持格式的文档，返回 Document 列表。
 
@@ -77,7 +78,7 @@ def load_documents(
 
     Raises:
         FileNotFoundError: 目录不存在
-        ValueError: 没有成功加载任何文档
+        ValueError: 没有成功加载任何文档；strict=True 时任意文件加载失败
     """
     dir_path = Path(directory or DOCUMENT_DIR).expanduser().resolve()
 
@@ -92,6 +93,8 @@ def load_documents(
     loaded_files: List[tuple[str, int]] = []
     # 跳过的文档
     skipped_files: List[str] = []
+    # 加载失败的文档。与“不支持格式”区分开，避免调用方误判文件已删除。
+    failed_files: List[tuple[str, str]] = []
     for file_path in _iter_files(dir_path, recursive=recursive):
         try:
             loader = get_loader_for_file(str(file_path))
@@ -100,6 +103,12 @@ def load_documents(
                 continue
 
             docs = loader.load()
+            docs = [doc for doc in docs if doc.page_content.strip()]
+            if not docs:
+                skipped_files.append(file_path.relative_to(dir_path).as_posix())
+                logger.warning("文件内容为空，已跳过: %s", skipped_files[-1])
+                continue
+
             source_metadata = _build_source_metadata(file_path, dir_path)
             for doc in docs:
                 doc.metadata.update(source_metadata)
@@ -112,9 +121,20 @@ def load_documents(
             relative_name = file_path.relative_to(dir_path).as_posix()
             logger.warning("文件加载失败: %s - %s", relative_name, e)
             skipped_files.append(relative_name)
+            failed_files.append((relative_name, str(e)))
 
     # 输出摘要
     _print_summary(dir_path, loaded_files, skipped_files, all_documents)
+
+    if strict and failed_files:
+        failed_summary = "\n".join(
+            f"  - {relative_name}: {reason}"
+            for relative_name, reason in failed_files
+        )
+        raise ValueError(
+            f"目录 {dir_path} 中有文件加载失败，已停止后续处理。\n"
+            f"{failed_summary}"
+        )
 
     if not all_documents:
         raise ValueError(

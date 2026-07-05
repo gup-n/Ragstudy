@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from data_loader.loader import load_documents
 from data_splitter.splitter import split_documents
 from embedding.schema import EmbeddingConfigCreate
+from llm.schema import LLMConfigCreate
 from vector_store.store import (
     _ensure_chunk_ids,
     _fingerprint_matches,
@@ -89,11 +90,28 @@ def check_embedding_schema() -> None:
     assert config.api_key == "sk-test"
 
 
+def check_llm_schema() -> None:
+    try:
+        LLMConfigCreate(provider="openai-compatible", model=" ")
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("empty LLM model should be rejected")
+
+    config = LLMConfigCreate(
+        provider="ollama",
+        model="qwen2.5:7b",
+    )
+    assert config.provider == "ollama"
+    assert config.api_key is None
+
+
 def main() -> None:
     check_data_loader()
     check_splitter()
     check_vector_metadata()
     check_embedding_schema()
+    check_llm_schema()
     print("manual logic checks passed")
 
 

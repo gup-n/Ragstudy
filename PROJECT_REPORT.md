@@ -46,6 +46,22 @@
 - 新增 `tests/`，覆盖文档加载、切割 metadata、向量 metadata、Embedding schema 校验。
 - 新增本文件和 `CODE_NOTES.md`，用于交付说明和逐文件代码说明。
 
+### 8. RAG 问答链
+- 新增 `rag_chain.py`，复用服务层检索结果，完成上下文拼接、提示词构造、Chat LLM 调用和来源引用返回。
+- 新增 `answer_demo.py`，支持单次问答、交互式问答、相关性阈值、上下文长度限制和调试上下文输出。
+- 新增 `llm/` 模块，按 `embedding/` 的结构提供 Chat LLM schema、ORM、CRUD、Provider 工厂和统一 manager。
+- 新增 `llm_config_demo.py`，支持用户自行选择 OpenAI-compatible API Key 模型或本地 Ollama 模型。
+- 新增 `.env.example`，提供 `RAG_LLM_*` 环境变量兜底占位符示例；真实密钥只应写入本机配置或环境变量。
+- 更新 `.gitignore`，排除本机 `.env` 和 `.env.*`，保留 `.env.example`。
+- 新增 `tests/test_rag_chain.py` 和 `tests/test_llm_schema.py`，覆盖问答链与 LLM 配置纯逻辑。
+
+### 9. FastAPI 与 Streamlit 页面
+- 新增 `api/`，暴露健康检查、配置状态、向量库状态、文档入库、语义检索和 RAG 问答接口。
+- 新增 `web/streamlit_app.py`，提供状态、入库、检索、问答四个页面。
+- Streamlit 通过 HTTP 连接 FastAPI，业务逻辑仍集中复用 `rag_service.py` 和 `rag_chain.py`。
+- 新增 `tests/test_api.py`，覆盖核心 API 契约。
+- 新增依赖 `fastapi`、`uvicorn[standard]`、`streamlit`，并更新 `uv.lock`。
+
 ---
 
 ## 二、当前项目具备的功能
@@ -80,38 +96,47 @@
 - `config_demo.py`：交互式配置 Embedding。
 - `main.py`：管线检查、入库、检索。
 - `query_demo.py`：单次或交互式语义检索演示。
+- `llm_config_demo.py`：交互式配置 Chat LLM。
+- `answer_demo.py`：单次或交互式 RAG 问答演示。
 
 ### 6. 可复用服务层
 - `rag_service.py` 提供加载切割、入库、统计、检索等函数。
 - 后续 FastAPI 可以直接复用服务层。
 
+### 7. RAG 问答链
+- `rag_chain.py` 提供检索上下文拼接、Chat LLM 配置和问答生成。
+- `answer_demo.py` 提供单次和交互式问答入口。
+- 支持 OpenAI-compatible 和 Ollama Chat LLM。
+- 支持通过 `llm_config_demo.py` 将 LLM 配置加密保存到 SQLite。
+- 数据库未启用 LLM 配置时，可读取 `RAG_LLM_*` 环境变量作为兜底。
+- 答案会返回引用来源编号、文件名、`chunk_id` 和相关性分数。
+
+### 8. Web API 和页面
+- `api/app.py` 提供 FastAPI 后端。
+- `web/streamlit_app.py` 提供 Streamlit 控制台。
+- 页面包含状态、入库、检索和问答 Tab。
+- API 状态接口不会返回 API Key 或其他真实密钥。
+
 ---
 
 ## 三、未完成部分和规划
 
-### P0：补齐环境锁文件和测试运行
-- 当前 `pyproject.toml` 已更新依赖声明，但 `uv.lock` 尚未更新。
-- 原因：当前环境中 `uv` 不在 PATH。
-- 规划：
-  1. 安装或恢复 `uv`。
-  2. 执行 `uv lock`。
-  3. 执行 `uv sync --group dev`。
-  4. 执行 `uv run pytest tests`。
+### P0：环境锁文件和测试运行（已完成）
+- 已使用用户本机 `uv.exe` 绝对路径完成验证。
+- `uv.lock` 已通过 `uv lock --check`，当前与 `pyproject.toml` 保持一致。
+- `uv run pytest tests -p no:cacheprovider` 已通过，共 24 个测试。
+- `uv run ruff check .` 已通过。
 
-### P1：完整 RAG 问答链
-- 当前项目已经完成检索，但还没有 LLM 生成回答。
-- 规划：
-  1. 新增 `llm` 或 `rag_chain` 模块。
-  2. 增加 Chat LLM 配置。
-  3. 将检索结果拼接为上下文。
-  4. 输出答案、引用片段和来源。
+### P1：完整 RAG 问答链（基础版已完成）
+- 已新增 `rag_chain.py` 和 `answer_demo.py`，可执行检索 + LLM 生成回答。
+- 已新增 `llm/` 配置模块和 `llm_config_demo.py`，用户可选择 API Key 模型或本地 Ollama 模型。
+- `.env` 仅作为部署兜底，不再是唯一配置方式。
+- 后续可继续完善：多轮对话、引用去重、上下文压缩和失败重试。
 
-### P1：FastAPI Web API
-- 当前没有 Web 服务接口。
-- 规划：
-  1. 新增 `api/` 目录。
-  2. 暴露文档入库、查询、配置检查、向量库统计接口。
-  3. 复用 `rag_service.py`，不重复业务逻辑。
+### P1：FastAPI Web API 和 Streamlit 页面（基础版已完成）
+- 已新增 FastAPI 后端和 Streamlit 控制台。
+- 已暴露文档入库、检索、问答、配置状态和向量库统计接口。
+- 后续可继续完善鉴权、任务队列、长任务进度、异步入库和更细粒度配置管理。
 
 ### P2：更强的检索质量
 - 可加入 MMR 检索。
@@ -128,6 +153,7 @@
 - PDF 当前适合文本型 PDF。
 - 扫描件 OCR 尚未支持。
 - DOCX 当前读取段落和表格文本，复杂格式暂不还原。
+- 旧版 Word `.doc` 当前不在支持格式内，会被加载器跳过；如需入库需转换为 `.docx` 或新增 `.doc` 解析支持。
 
 ---
 
@@ -158,9 +184,14 @@ uv sync --group dev
 | `data_loader/config.py` | `langchain-community`、`pypdf`、`python-docx` | TXT、MD、PDF、DOCX 加载 |
 | `data_splitter/config.py` | `langchain-text-splitters` | 文本切割 |
 | `embedding/providers.py` | `langchain-huggingface`、`langchain-ollama`、`langchain-openai` | 创建 Embedding 实例 |
+| `llm/providers.py` | `langchain-openai`、`langchain-ollama` | 创建 Chat LLM 实例 |
 | `embedding/downloader.py` | `huggingface-hub` | 下载 HuggingFace 模型 |
 | `embedding/crud.py` | `sqlalchemy`、`cryptography`、`pydantic` | 配置存储、加密、校验 |
+| `llm/crud.py` | `sqlalchemy`、`cryptography`、`pydantic` | LLM 配置存储、加密、校验 |
 | `vector_store/store.py` | `langchain-chroma` | ChromaDB 持久化和检索 |
+| `llm/env.py` | `python-dotenv` | LLM 环境变量兜底 |
+| `api/app.py` | `fastapi`、`uvicorn` | Web API 后端 |
+| `web/streamlit_app.py` | `streamlit` | RAG 控制台页面 |
 | `tests/` | `pytest` | 单元测试 |
 | 代码检查 | `ruff` | 静态检查 |
 
@@ -174,9 +205,9 @@ uv run ruff check .
 ```
 
 ### 5. 当前环境注意事项
-- 当前终端找不到 `uv`。
-- 当前项目虚拟环境中有 `ruff`，但没有 `pytest`。
-- 因此本次可以运行 `ruff`，但不能直接运行 `pytest`。
+- Codex 工具进程默认 PATH 不包含用户通过 pip 安装的 `uv.exe`。
+- 后续在 Codex 工具中运行 uv 时使用绝对路径：`C:\Users\14428\AppData\Local\Programs\Python\Python314\Scripts\uv.exe`。
+- pytest 命令可加 `-p no:cacheprovider`，用于避开当前 `.pytest_cache` 目录权限提示。
 
 ---
 
@@ -188,11 +219,10 @@ uv run ruff check .
 - 已完成基础测试文件编写。
 - 已完成依赖声明补齐。
 
-### 待执行的检查
-- Python 语法编译检查。
-- Ruff 静态检查。
-- Git 空白检查。
-- 如果环境具备测试工具，则运行单元测试。
+### 已补充执行的检查
+- `uv lock --check`：通过。
+- `uv run pytest tests -p no:cacheprovider`：通过，共 24 个测试。
+- `uv run ruff check .`：通过。
 
 ---
 
@@ -200,7 +230,8 @@ uv run ruff check .
 
 请接着维护这个 RAG 项目。项目路径是 `F:\coding\python\project\RAG`，仓库是 `https://github.com/gup-n/Ragstudy.git`。
 
-当前项目已经完成文档加载、文本切割、Embedding 配置、ChromaDB 向量存储、增量入库、带分数语义检索和服务层抽象。核心服务层在 `rag_service.py`。入口脚本包括 `main.py`、`query_demo.py`、`config_demo.py`。
+当前项目已经完成文档加载、文本切割、Embedding 配置、ChromaDB 向量存储、增量入库、带分数语义检索、服务层抽象、基础 RAG 问答链、FastAPI 后端和 Streamlit 页面。核心服务层在 `rag_service.py`。CLI 入口包括 `main.py`、`query_demo.py`、`answer_demo.py`、`config_demo.py`、`llm_config_demo.py`；Web 入口包括 `api/app.py` 和 `web/streamlit_app.py`。
+当前也已具备基础 RAG 问答链：`rag_chain.py` 负责检索上下文拼接和 LLM 调用，`answer_demo.py` 提供单次/交互式问答入口，`llm/` 和 `llm_config_demo.py` 负责 Chat LLM 配置管理；`.env.example` 中的 `RAG_LLM_*` 仅作为部署兜底示例。
 
 关键设计：
 - 文档目录为 `Data/docs`。
@@ -213,10 +244,9 @@ uv run ruff check .
 - API Key 加密存储在 SQLite 中。
 
 尚未完成：
-- 需要更新 `uv.lock`。
-- 需要安装开发依赖并运行 `pytest`。
-- 需要实现完整 RAG 问答链。
-- 需要实现 FastAPI Web API。
+- 需要按需求增强 `.doc`、OCR 和检索质量。
+- 可继续增强问答链的多轮对话、引用去重和上下文压缩。
+- 可继续增强 Web 侧鉴权、任务进度和异步入库。
 
 请先运行：
 
@@ -226,7 +256,7 @@ uv run pytest tests
 uv run ruff check .
 ```
 
-如果继续开发，优先实现 RAG 问答链或 FastAPI，并复用 `rag_service.py`。
+如果继续开发，优先增强 Web 侧鉴权、任务进度或异步入库，继续复用 `rag_service.py`。
 
 ---
 
@@ -254,15 +284,16 @@ uv run ruff check .
 - 可清理已删除源文件的旧向量。
 - 可执行语义检索并返回相关性分数。
 - 可通过服务层复用管线能力。
-- 可通过手动检查脚本验证核心逻辑。
+- 可配置 Chat LLM，并执行带引用来源的 RAG 问答。
+- 可通过 FastAPI 暴露状态、入库、检索和问答接口。
+- 可通过 Streamlit 控制台连接 FastAPI 使用入库、检索和问答功能。
+- 可通过 pytest、ruff 和手动检查脚本验证核心逻辑。
 
 ### 3. 测试后确认未完成部分
-- `uv.lock` 仍需在具备 `uv` 的环境中更新。
-- `pytest` 需要通过 `uv sync --group dev` 安装后再运行。
-- 完整 RAG 问答链尚未实现。
-- FastAPI Web API 尚未实现。
+- RAG 问答链基础版已实现，LLM 配置管理已具备基础能力，后续可增强多轮对话、引用去重和上下文压缩。
+- FastAPI Web API 和 Streamlit 页面基础版已实现，后续可增强鉴权、任务进度和异步入库。
 - 检索增强能力如 MMR、metadata filter、重排序尚未实现。
-- OCR、复杂 DOCX 格式还原尚未实现。
+- OCR、旧版 Word `.doc`、复杂 DOCX 格式还原尚未实现。
 
 ### 4. 测试后依赖安装建议
 
@@ -288,11 +319,16 @@ uv sync
 - Ruff 静态检查：通过。
 - Git 空白检查：通过。
 - 手动逻辑检查：通过，输出为 `manual logic checks passed`。
+- `uv lock --check`：通过，解析 118 个包。
+- `uv run pytest tests -p no:cacheprovider`：通过，共 24 个测试。
+- `uv run ruff check .`：通过，输出为 `All checks passed!`。
+- FastAPI `/health`：通过，返回 `{"status":"ok","service":"rag-api"}`。
+- FastAPI `/config/status`：通过，能返回 Embedding/LLM 配置状态且不包含密钥。
+- Streamlit 首页：通过，返回 HTTP 200。
 
-### 6. 本次未能执行的检查
-- `pytest tests` 未执行。
-- 原因：当前虚拟环境没有 `pytest` 命令，当前终端也找不到 `uv`。
-- 处理：已将 `pytest` 加入开发依赖组，并新增 `tests/manual_logic_check.py` 作为临时冒烟检查。
+### 6. 当前环境限制
+- Codex 工具进程不会自动继承用户终端 PATH，直接运行 `uv` 可能找不到命令。
+- 使用用户本机 `uv.exe` 绝对路径并授权后，可以正常运行测试和静态检查。
 
 ### 7. 测试后新会话 Prompt
 
@@ -309,4 +345,4 @@ uv run pytest tests
 uv run ruff check .
 ```
 
-随后优先实现完整 RAG 问答链，或基于 `rag_service.py` 实现 FastAPI Web API。
+环境验证已完成。随后优先增强 Web 侧鉴权、任务进度或异步入库，或继续增强基础版 RAG 问答链。
